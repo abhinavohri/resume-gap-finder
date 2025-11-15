@@ -40,27 +40,26 @@ def analyze():
         - job_url: URL
 
     Returns:
-        task_id for status checking
+        202: task_id and status_url
+        400: error message
+        500: error message
     """
     try:
         if 'resume' not in request.files:
-            return jsonify({'success': False, 'error': 'No resume file provided'}), 400
+            return jsonify({'error': 'No resume file provided'}), 400
 
         resume_file = request.files['resume']
         if resume_file.filename == '':
-            return jsonify({'success': False, 'error': 'No file selected'}), 400
+            return jsonify({'error': 'No file selected'}), 400
 
         if not resume_file.filename.endswith('.pdf'):
-            return jsonify({'success': False, 'error': 'Only PDF files allowed'}), 400
+            return jsonify({'error': 'Only PDF files allowed'}), 400
 
         job_url = request.form.get('job_url')
         job_description = request.form.get('job_description')
 
         if not job_url and not job_description:
-            return jsonify({
-                'success': False,
-                'error': 'Provide either job_url or job_description'
-            }), 400
+            return jsonify({'error': 'Provide either job_url or job_description'}), 400
 
         filename = secure_filename(resume_file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -76,14 +75,13 @@ def analyze():
 
         app.logger.info(f'Task queued: {task.id}')
         return jsonify({
-            'success': True,
             'task_id': task.id,
             'status_url': f'/task/{task.id}'
         }), 202
 
     except Exception as e:
         app.logger.error(f'Error submitting task: {str(e)}')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/task/<task_id>')
@@ -92,7 +90,8 @@ def get_task_status(task_id):
     Get task status (for polling).
 
     Returns:
-        Task state, status message, and result when complete
+        200: Task state, status message, and result
+        500: error message
     """
     try:
         task = AsyncResult(task_id)
@@ -123,7 +122,7 @@ def get_task_status(task_id):
                 'status': str(task.info)
             }
 
-        return jsonify(response)
+        return jsonify(response), 200
 
     except Exception as e:
         app.logger.error(f'Error checking task status: {str(e)}')
