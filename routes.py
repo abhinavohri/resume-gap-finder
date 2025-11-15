@@ -5,7 +5,8 @@ import os
 from flask import request, jsonify
 from werkzeug.utils import secure_filename
 from app import app
-import resume_service
+from tasks import analyze_resume_task
+from celery.result import AsyncResult
 
 
 @app.route('/')
@@ -15,7 +16,8 @@ def index():
         'service': 'Resume Gap Finder API',
         'version': '1.0.0',
         'endpoints': {
-            'analyze': '/analyze (POST)',
+            'analyze': '/analyze (POST) - Submit analysis task',
+            'status': '/task/<task_id> (GET) - Get task status',
             'health': '/health (GET)'
         }
     })
@@ -30,12 +32,15 @@ def health():
 @app.route('/analyze', methods=['POST'])
 def analyze():
     """
-    Analyze resume against job description.
+    Submit resume analysis task.
 
     Form data:
         - resume: PDF file
         - job_description: Text OR
         - job_url: URL
+
+    Returns:
+        task_id for status checking
     """
     try:
         if 'resume' not in request.files:
@@ -62,23 +67,64 @@ def analyze():
         resume_file.save(filepath)
         app.logger.info(f'Saved resume: {filename}')
 
-        resume_text = resume_service.extract_text_from_pdf(filepath)
-
-        if job_url:
-            app.logger.info(f'Fetching job from URL: {job_url}')
-            job_description = resume_service.extract_text_from_url(job_url)
-
-        app.logger.info('Starting analysis...')
-        result = resume_service.analyze_resume(
-            app.config['GEMINI_API_KEY'],
-            resume_text,
-            job_description
+        task = analyze_resume_task.delay(
+            filepath,
+            job_description,
+            job_url,
+            app.config['GEMINI_API_KEY']
         )
-        os.remove(filepath)
 
-        app.logger.info('Analysis complete')
-        return jsonify(result)
+        app.logger.info(f'Task queued: {task.id}')
+        return jsonify({
+            'success': True,
+            'task_id': task.id,
+            'status_url': f'/task/{task.id}'
+        }), 202
 
     except Exception as e:
-        app.logger.error(f'Error: {str(e)}')
+        app.logger.error(f'Error submitting task: {str(e)}')
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/task/<task_id>')
+def get_task_status(task_id):
+    """
+    Get task status (for polling).
+
+    Returns:
+        Task state, status message, and result when complete
+    """
+    try:
+        task = AsyncResult(task_id)
+
+        if task.state == 'PENDING':
+            response = {
+                'state': task.state,
+                'status': 'Task is waiting in queue...'
+            }
+        elif task.state == 'PROCESSING':
+            response = {
+                'state': task.state,
+                'status': task.info.get('status', 'Processing...')
+            }
+        elif task.state == 'SUCCESS':
+            response = {
+                'state': task.state,
+                'result': task.result
+            }
+        elif task.state == 'FAILURE':
+            response = {
+                'state': task.state,
+                'error': str(task.info)
+            }
+        else:
+            response = {
+                'state': task.state,
+                'status': str(task.info)
+            }
+
+        return jsonify(response)
+
+    except Exception as e:
+        app.logger.error(f'Error checking task status: {str(e)}')
+        return jsonify({'error': str(e)}), 500
