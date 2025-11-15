@@ -2,6 +2,7 @@ from PyPDF2 import PdfReader
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
+from newspaper import Article
 
 resume_pdf = 'AbhinavOhri.pdf'
 
@@ -16,9 +17,23 @@ def extract_text_from_pdf(pdf_path):
 
     return text
 
+def extract_text_from_url(url):
+    text = ""
+    try:
+        article = Article(url)
+        article.download()
+        article.parse()
+        text = article.text
+    except Exception as e:
+        print(f"Error: Could not extract text from URL {url}. Error: {e}")
+    
+    return text
+
 extracted_resume_text = extract_text_from_pdf(resume_pdf)
 
-
+# job_desc_url = "https://ats.rippling.com/rippling/jobs/f6909f33-27f5-4e1d-bc58-791d9b9fbdad?referral_id=ba8a880f-1a35-401d-bad2-fcc354f90210"
+job_desc_url = "https://www.linkedin.com/jobs/view/4309753456/?alternateChannel=search&eBP=BUDGET_EXHAUSTED_JOB&refId=lMlD66LtBLlV4rqwvLP8Ug%3D%3D&trackingId=PBpn%2Bc9aE%2BljT%2BU5k7gVoA%3D%3D%27"
+extracted_job_desc_from_url = extract_text_from_url(job_desc_url)
 
 job_desc = """About the role
 At Rippling, Engineering is at the heart of our business and culture. We are looking for highly motivated upcoming or recent grads to join our software engineering teams. As a New Grad Engineer at Rippling, you will work on projects that impact the highest priorities of our technology and business, all while collaborating cross-functionally with multiple teams and stakeholders. You will build products and features that fulfill our mission; free smart people to work on hard problems!
@@ -82,7 +97,7 @@ prompt = f"""
 
 **[Input 1: Job Description]**
 
-{job_desc}
+{extracted_job_desc_from_url}
 
 **[Input 2: Resume]**
 
